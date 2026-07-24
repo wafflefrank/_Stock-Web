@@ -1,0 +1,27 @@
+{
+  "name": "equitypulse-tw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort --configLoader runner",
+    "build": "vite build --configLoader runner",
+    "preview": "vite preview --host 127.0.0.1 --configLoader runner",
+    "test": "vitest run --configLoader runner",
+    "test:watch": "vitest --configLoader runner"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "6.0.8",
+    "lucide-vue-next": "0.468.0",
+    "pinia": "3.0.3",
+    "swiper": "^14.0.6",
+    "vite": "7.3.6",
+    "vue": "3.5.40",
+    "vue-toastification": "^2.0.0-rc.5"
+  },
+  "devDependencies": {
+    "@vue/test-utils": "2.4.11",
+    "jsdom": "26.1.0",
+    "vitest": "3.2.7"
+  }
+}
