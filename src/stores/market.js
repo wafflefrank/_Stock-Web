@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import {
   STOCK_DIRECTORY,
   TAIWAN_WATCHLIST,
+  fetchMarketIndices,
   fetchTaiwanStock,
   fetchTaiwanWatchlist,
   getFallbackHeadlineSignals,
@@ -122,15 +123,28 @@ export const useMarketStore = defineStore('market', {
       this.isLoading = true
       this.lastError = ''
 
-      try {
-        const stocks = await fetchTaiwanWatchlist({
+      const [stocksResult, indicesResult] = await Promise.allSettled([
+        fetchTaiwanWatchlist({
           symbols: this.watchlistSymbols,
           token: options.token ?? import.meta.env?.VITE_FINMIND_TOKEN,
           startDate: options.startDate,
           fetcher: options.fetcher
+        }),
+        fetchMarketIndices({
+          fetcher: options.indexFetcher ?? options.fetcher ?? fetch
         })
+      ])
 
-        this.stocks = stocks
+      if (indicesResult.status === 'fulfilled') {
+        this.indices = indicesResult.value
+      }
+
+      try {
+        if (stocksResult.status === 'rejected') {
+          throw stocksResult.reason
+        }
+
+        this.stocks = stocksResult.value
         this.dataMode = 'live'
         this.dataSource = 'FinMind TaiwanStockPrice'
         this.lastUpdated = new Date()

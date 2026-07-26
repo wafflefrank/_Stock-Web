@@ -24,7 +24,7 @@ describe('App', () => {
 
     expect(wrapper.text()).toContain('EquityPulse TW')
     expect(wrapper.text()).toContain('台股財經快訊')
-    expect(wrapper.text()).toContain('台股核心觀察清單')
+    expect(wrapper.text()).toContain('台股觀察清單')
   })
 
   it('updates the hero snapshot when a Taiwan stock row is selected', async () => {

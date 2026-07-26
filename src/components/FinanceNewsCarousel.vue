@@ -3,14 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import ExternalLink from 'lucide-vue-next/dist/esm/icons/external-link.js'
 import LoaderCircle from 'lucide-vue-next/dist/esm/icons/loader-circle.js'
 import Newspaper from 'lucide-vue-next/dist/esm/icons/newspaper.js'
-import { A11y, Autoplay, Keyboard, Navigation, Pagination } from 'swiper/modules'
+import { A11y, Autoplay, Keyboard, Pagination } from 'swiper/modules'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import 'swiper/css'
-import 'swiper/css/navigation'
 import 'swiper/css/pagination'
 import { fetchTaiwanFinanceNews } from '../services/taiwanNewsApi'
 
-const modules = [A11y, Autoplay, Keyboard, Navigation, Pagination]
+const modules = [A11y, Autoplay, Keyboard, Pagination]
 const newsItems = ref([])
 const isLoading = ref(true)
 
@@ -64,7 +63,6 @@ function formatNewsTime(value) {
       :speed="620"
       :loop="canLoop"
       :keyboard="{ enabled: true }"
-      :navigation="canLoop"
       :pagination="{ clickable: true }"
       :autoplay="{ delay: 4200, disableOnInteraction: false, pauseOnMouseEnter: true }"
     >

@@ -57,8 +57,9 @@ describe('market store', () => {
       ok: true,
       json: async () => finMindPayload
     })
+    const indexFetcher = vi.fn().mockRejectedValue(new Error('offline indices'))
 
-    await market.refreshPrices({ fetcher, startDate: '2026-07-01' })
+    await market.refreshPrices({ fetcher, indexFetcher, startDate: '2026-07-01' })
 
     expect(fetcher).toHaveBeenCalledTimes(1)
     expect(market.refreshCount).toBe(1)

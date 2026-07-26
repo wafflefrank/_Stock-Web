@@ -1,6 +1,10 @@
 export const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data'
+export const TWSE_MARKET_INDEX_ENDPOINT = '/api/twse/market-index'
+export const TPEX_INDEX_ENDPOINT = '/api/tpex/index'
+export const YAHOO_FINANCE_CHART_ENDPOINT = '/api/yahoo-finance/chart'
 
 export const TAIWAN_WATCHLIST = ['2330', '2317', '2454', '2308', '2881', '2412']
+
 
 export const OFFICIAL_MARKET_SOURCES = {
   twse: 'https://openapi.twse.com.tw/',
@@ -123,11 +127,47 @@ export function getFallbackTaiwanStocks() {
 
 export function getFallbackTaiwanIndices() {
   return [
-    { symbol: 'TAIEX', label: '加權指數', value: 23584.82, change: 0.86 },
-    { symbol: 'TPEx', label: '櫃買指數', value: 263.14, change: 0.41 },
-    { symbol: 'ELEC', label: '電子類指', value: 1289.44, change: 1.12 },
-    { symbol: 'FIN', label: '金融保險', value: 2134.61, change: -0.18 }
+    { symbol: 'TWII', label: '加權指數', value: 43654.84, change: -2.67 },
+    { symbol: 'TPEX', label: '櫃買指數', value: 377.63, change: -3.69 },
+    { symbol: 'DJI', label: '道瓊指數', value: 51711.65, change: -0.97 },
+    { symbol: 'IXIC', label: '那斯達克指數', value: 25137.69, change: -2.15 },
+    { symbol: 'SOX', label: '費城半導體', value: 12343.84, change: -0.54 }
   ]
+}
+
+export async function fetchMarketIndices({
+  fetcher = fetch,
+  twseEndpoint = TWSE_MARKET_INDEX_ENDPOINT,
+  tpexEndpoint = TPEX_INDEX_ENDPOINT,
+  yahooChartEndpoint = YAHOO_FINANCE_CHART_ENDPOINT
+} = {}) {
+  const fallbackIndices = getFallbackTaiwanIndices()
+  const requests = await Promise.allSettled([
+    fetchTwseWeightedIndex({ fetcher, endpoint: twseEndpoint }),
+    fetchTpexIndex({ fetcher, endpoint: tpexEndpoint }),
+    fetchYahooIndex('^DJI', {
+      fetcher,
+      endpoint: yahooChartEndpoint,
+      symbol: 'DJI',
+      label: '道瓊指數'
+    }),
+    fetchYahooIndex('^IXIC', {
+      fetcher,
+      endpoint: yahooChartEndpoint,
+      symbol: 'IXIC',
+      label: '那斯達克指數'
+    }),
+    fetchYahooIndex('^SOX', {
+      fetcher,
+      endpoint: yahooChartEndpoint,
+      symbol: 'SOX',
+      label: '費城半導體'
+    })
+  ])
+
+  return requests.map((result, index) =>
+    result.status === 'fulfilled' && result.value ? result.value : fallbackIndices[index]
+  )
 }
 
 export function getFallbackSectorFlows() {
@@ -148,11 +188,50 @@ export function getFallbackHeadlineSignals() {
   ]
 }
 
-export function buildFinMindUrl(symbol, { startDate, token } = {}) {
+const HISTORY_RANGE_CONFIG = {
+  '1D': { days: 10, limit: 1 },
+  '5D': { days: 14, limit: 5 },
+  '1M': { months: 1 },
+  '6M': { months: 6 },
+  YTD: { yearToDate: true },
+  '1Y': { years: 1 },
+  '5Y': { years: 5 },
+  MAX: { startDate: '1994-10-01' }
+}
+
+export function buildFinMindUrl(symbol, { startDate, endDate, token } = {}) {
+  return buildFinMindDatasetUrl('TaiwanStockPrice', symbol, {
+    startDate: startDate ?? getDefaultStartDate(),
+    endDate,
+    token
+  })
+}
+
+export function buildFinMindDatasetUrl(dataset, symbol, { startDate, endDate, token } = {}) {
   const params = new URLSearchParams({
-    dataset: 'TaiwanStockPrice',
-    data_id: symbol,
-    start_date: startDate ?? getDefaultStartDate()
+    dataset,
+    data_id: symbol
+  })
+
+  if (startDate) {
+    params.set('start_date', startDate)
+  }
+
+  if (endDate) {
+    params.set('end_date', endDate)
+  }
+
+  if (token) {
+    params.set('token', token)
+  }
+
+  return `${FINMIND_ENDPOINT}?${params.toString()}`
+}
+
+export function buildFinMindStockInfoUrl(symbol, { token } = {}) {
+  const params = new URLSearchParams({
+    dataset: 'TaiwanStockInfo',
+    data_id: symbol
   })
 
   if (token) {
@@ -174,7 +253,10 @@ export async function fetchTaiwanWatchlist({
   const requests = await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        const response = await fetcher(buildFinMindUrl(symbol, { startDate, token }))
+        const [response, profile] = await Promise.all([
+          fetcher(buildFinMindUrl(symbol, { startDate, token })),
+          getTaiwanStockProfile(symbol, { token, fetcher })
+        ])
 
         if (!response.ok) {
           throw new Error(`FinMind request failed: ${response.status}`)
@@ -183,7 +265,7 @@ export async function fetchTaiwanWatchlist({
         const payload = await response.json()
         const rows = Array.isArray(payload.data) ? payload.data : []
 
-        return rows.length ? mapFinMindRowsToStock(symbol, rows) : null
+        return rows.length ? mapFinMindRowsToStock(symbol, rows, profile) : null
       } catch {
         return null
       }
@@ -214,7 +296,113 @@ export async function fetchTaiwanStock(symbol, options = {}) {
   return stock
 }
 
-export function mapFinMindRowsToStock(symbol, rows) {
+export async function fetchTaiwanStockHistory(symbol, {
+  range = '1M',
+  endDate,
+  token,
+  fetcher = fetch
+} = {}) {
+  const rangeWindow = getHistoryRangeWindow(range, endDate)
+  const response = await fetcher(
+    buildFinMindUrl(symbol, {
+      startDate: rangeWindow.startDate,
+      endDate: rangeWindow.endDate,
+      token
+    })
+  )
+
+  if (!response.ok) {
+    throw new Error(`FinMind history request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  const rows = Array.isArray(payload.data) ? payload.data : []
+  const history = mapFinMindRowsToHistory(rows)
+  const limitedHistory = rangeWindow.limit ? history.slice(-rangeWindow.limit) : history
+
+  if (limitedHistory.length === 0) {
+    throw new Error(`No history rows for ${symbol}`)
+  }
+
+  return limitedHistory
+}
+
+export async function fetchTaiwanStockFundamentals(symbol, {
+  close,
+  endDate,
+  token,
+  fetcher = fetch
+} = {}) {
+  const normalizedEndDate = endDate || formatApiDate(new Date())
+  const perStartDate = shiftApiDate(normalizedEndDate, { days: -45 })
+  const dividendStartDate = shiftApiDate(normalizedEndDate, { years: -2 })
+  const [perResult, dividendResult] = await Promise.allSettled([
+    fetchFinMindDataset('TaiwanStockPER', symbol, {
+      startDate: perStartDate,
+      endDate: normalizedEndDate,
+      token,
+      fetcher
+    }),
+    fetchFinMindDataset('TaiwanStockDividend', symbol, {
+      startDate: dividendStartDate,
+      endDate: normalizedEndDate,
+      token,
+      fetcher
+    })
+  ])
+  const perRows = perResult.status === 'fulfilled' ? perResult.value : []
+  const dividendRows = dividendResult.status === 'fulfilled' ? dividendResult.value : []
+  const latestPer = selectLatestRow(perRows)
+  const latestDividend = selectLatestRow(dividendRows, 'date')
+  const shares = Number(latestDividend?.ParticipateDistributionOfTotalShares)
+  const closePrice = Number(close)
+  const marketCap = Number.isFinite(shares) && Number.isFinite(closePrice) ? shares * closePrice : null
+
+  return {
+    per: parseOptionalNumber(latestPer?.PER),
+    pbr: parseOptionalNumber(latestPer?.PBR),
+    dividendYield: parseOptionalNumber(latestPer?.dividend_yield),
+    dividend: parseOptionalNumber(latestDividend?.CashEarningsDistribution),
+    shares: Number.isFinite(shares) ? shares : null,
+    marketCap
+  }
+}
+
+export async function getTaiwanStockProfile(symbol, { token, fetcher = fetch } = {}) {
+  if (STOCK_PROFILES[symbol]) {
+    return STOCK_PROFILES[symbol]
+  }
+
+  try {
+    const response = await fetcher(buildFinMindStockInfoUrl(symbol, { token }))
+
+    if (!response.ok) {
+      throw new Error(`FinMind stock info request failed: ${response.status}`)
+    }
+
+    const payload = await response.json()
+    const rows = Array.isArray(payload.data) ? payload.data : []
+    const row = selectBestStockInfoRow(rows)
+
+    if (!row?.stock_name) {
+      throw new Error(`No TaiwanStockInfo profile for ${symbol}`)
+    }
+
+    return {
+      company: row.stock_name,
+      sector: row.industry_category || '台股',
+      signal: '公司資料同步'
+    }
+  } catch {
+    return {
+      company: symbol,
+      sector: '台股',
+      signal: '同步資料'
+    }
+  }
+}
+
+export function mapFinMindRowsToStock(symbol, rows, stockProfile = STOCK_PROFILES[symbol]) {
   const sortedRows = [...rows]
     .filter((row) => Number.isFinite(Number(row.close)))
     .sort((a, b) => String(a.date).localeCompare(String(b.date)))
@@ -230,7 +418,7 @@ export function mapFinMindRowsToStock(symbol, rows) {
   const change = previousClose
     ? Number((((close - previousClose) / previousClose) * 100).toFixed(2))
     : 0
-  const profile = STOCK_PROFILES[symbol] ?? {
+  const profile = stockProfile ?? {
     company: symbol,
     sector: '台股',
     signal: '同步資料'
@@ -241,19 +429,266 @@ export function mapFinMindRowsToStock(symbol, rows) {
     company: profile.company,
     price: roundPrice(close),
     change,
+    open: roundPrice(Number(last.open ?? close)),
+    high: roundPrice(Number(last.max ?? close)),
+    low: roundPrice(Number(last.min ?? close)),
     volume: Number(last.Trading_Volume ?? 0),
     tradingValue: Number(last.Trading_money ?? 0),
     sector: profile.sector,
     signal: profile.signal,
     sparkline: sortedRows.slice(-11).map((row) => roundPrice(Number(row.close))),
+    priceHistory: mapFinMindRowsToHistory(sortedRows),
     asOfDate: last.date
   }
+}
+
+export function mapFinMindRowsToHistory(rows) {
+  return [...rows]
+    .filter((row) => Number.isFinite(Number(row.close)) && row.date)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .map((row) => ({
+      date: row.date,
+      open: roundPrice(Number(row.open ?? row.close)),
+      high: roundPrice(Number(row.max ?? row.close)),
+      low: roundPrice(Number(row.min ?? row.close)),
+      close: roundPrice(Number(row.close)),
+      volume: Number(row.Trading_Volume ?? 0)
+    }))
+}
+
+function selectBestStockInfoRow(rows) {
+  return (
+    rows.find((row) => row.industry_category && row.industry_category !== '電子工業') ??
+    rows[0] ??
+    null
+  )
+}
+
+async function fetchFinMindDataset(dataset, symbol, { startDate, endDate, token, fetcher }) {
+  const response = await fetcher(
+    buildFinMindDatasetUrl(dataset, symbol, {
+      startDate,
+      endDate,
+      token
+    })
+  )
+
+  if (!response.ok) {
+    throw new Error(`FinMind ${dataset} request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  return Array.isArray(payload.data) ? payload.data : []
+}
+
+function selectLatestRow(rows, dateKey = 'date') {
+  return [...rows]
+    .filter((row) => row?.[dateKey])
+    .sort((a, b) => String(a[dateKey]).localeCompare(String(b[dateKey])))
+    .at(-1)
+}
+
+async function fetchTwseWeightedIndex({ fetcher, endpoint }) {
+  const response = await fetcher(endpoint)
+
+  if (!response.ok) {
+    throw new Error(`TWSE market index request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  const rows = Array.isArray(payload.data) ? payload.data : []
+  const latest = rows.at(-1)
+
+  if (!latest) {
+    throw new Error('TWSE market index returned no rows.')
+  }
+
+  const value = parseMarketNumber(latest[4])
+  const pointChange = parseMarketNumber(latest[5])
+
+  return {
+    symbol: 'TWII',
+    label: '加權指數',
+    value: roundPrice(value),
+    change: calculateChangePercent(value, pointChange)
+  }
+}
+
+async function fetchTpexIndex({ fetcher, endpoint }) {
+  const response = await fetcher(endpoint)
+
+  if (!response.ok) {
+    throw new Error(`TPEx index request failed: ${response.status}`)
+  }
+
+  const rows = await response.json()
+  const latest = Array.isArray(rows) ? rows.at(-1) : null
+
+  if (!latest) {
+    throw new Error('TPEx index returned no rows.')
+  }
+
+  const value = parseMarketNumber(latest.Close)
+  const pointChange = parseMarketNumber(latest.Change)
+
+  return {
+    symbol: 'TPEX',
+    label: '櫃買指數',
+    value: roundPrice(value),
+    change: calculateChangePercent(value, pointChange)
+  }
+}
+
+async function fetchYahooIndex(yahooSymbol, { fetcher, endpoint, symbol, label }) {
+  const response = await fetcher(buildYahooChartUrl(endpoint, yahooSymbol))
+
+  if (!response.ok) {
+    throw new Error(`Yahoo Finance index request failed: ${response.status}`)
+  }
+
+  const payload = await response.json()
+  const result = payload.chart?.result?.[0]
+  const selectedQuote = selectYahooCompletedDailyQuote(result)
+  const meta = result?.meta
+  const value = selectedQuote?.value ?? Number(meta?.regularMarketPrice)
+  const previousClose = selectedQuote?.previousClose ?? Number(meta?.chartPreviousClose)
+
+  if (!Number.isFinite(value) || !Number.isFinite(previousClose)) {
+    throw new Error(`Yahoo Finance index returned no usable quote for ${yahooSymbol}.`)
+  }
+
+  const pointChange = value - previousClose
+
+  return {
+    symbol,
+    label,
+    value: roundPrice(value),
+    change: calculateChangePercent(value, pointChange)
+  }
+}
+
+function buildYahooChartUrl(endpoint, symbol) {
+  const params = new URLSearchParams({
+    range: '5d',
+    interval: '1d'
+  })
+
+  return `${endpoint}/${encodeURIComponent(symbol)}?${params.toString()}`
+}
+
+function selectYahooCompletedDailyQuote(result) {
+  const closes = result?.indicators?.quote?.[0]?.close ?? []
+  const timestamps = result?.timestamp ?? []
+  const latestIndex = closes.findLastIndex((value) => Number.isFinite(Number(value)))
+
+  if (latestIndex < 0) {
+    return null
+  }
+
+  const regularEnd = Number(result?.meta?.currentTradingPeriod?.regular?.end)
+  const isCurrentSessionOpen = Number.isFinite(regularEnd) && Date.now() / 1000 < regularEnd
+  const valueIndex = isCurrentSessionOpen && latestIndex > 0 ? latestIndex - 1 : latestIndex
+  const previousIndex = valueIndex - 1
+  const value = Number(closes[valueIndex])
+  const previousClose = Number(closes[previousIndex])
+
+  if (!Number.isFinite(value) || !Number.isFinite(previousClose)) {
+    return null
+  }
+
+  return {
+    value,
+    previousClose,
+    timestamp: timestamps[valueIndex]
+  }
+}
+
+function calculateChangePercent(value, pointChange) {
+  const previousClose = value - pointChange
+
+  if (!Number.isFinite(previousClose) || previousClose === 0) {
+    return 0
+  }
+
+  return Number(((pointChange / previousClose) * 100).toFixed(2))
+}
+
+function parseMarketNumber(value) {
+  return Number(String(value ?? '').replace(/,/g, ''))
 }
 
 function getDefaultStartDate() {
   const date = new Date()
   date.setDate(date.getDate() - 45)
   return date.toISOString().slice(0, 10)
+}
+
+function getHistoryRangeWindow(range, endDate = formatApiDate(new Date())) {
+  const config = HISTORY_RANGE_CONFIG[range] ?? HISTORY_RANGE_CONFIG['1M']
+  const normalizedEndDate = endDate || formatApiDate(new Date())
+
+  if (config.startDate) {
+    return {
+      startDate: config.startDate,
+      endDate: normalizedEndDate,
+      limit: config.limit
+    }
+  }
+
+  if (config.yearToDate) {
+    return {
+      startDate: `${normalizedEndDate.slice(0, 4)}-01-01`,
+      endDate: normalizedEndDate,
+      limit: config.limit
+    }
+  }
+
+  const date = parseApiDate(normalizedEndDate)
+
+  if (config.years) {
+    date.setUTCFullYear(date.getUTCFullYear() - config.years)
+  }
+
+  if (config.months) {
+    date.setUTCMonth(date.getUTCMonth() - config.months)
+  }
+
+  if (config.days) {
+    date.setUTCDate(date.getUTCDate() - config.days)
+  }
+
+  return {
+    startDate: formatApiDate(date),
+    endDate: normalizedEndDate,
+    limit: config.limit
+  }
+}
+
+function parseApiDate(value) {
+  const [year, month, day] = String(value).split('-').map(Number)
+
+  if (![year, month, day].every(Number.isFinite)) {
+    return new Date()
+  }
+
+  return new Date(Date.UTC(year, month - 1, day))
+}
+
+function formatApiDate(date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function shiftApiDate(value, { days = 0, months = 0, years = 0 } = {}) {
+  const date = parseApiDate(value)
+  date.setUTCFullYear(date.getUTCFullYear() + years)
+  date.setUTCMonth(date.getUTCMonth() + months)
+  date.setUTCDate(date.getUTCDate() + days)
+  return formatApiDate(date)
+}
+
+function parseOptionalNumber(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
 }
 
 function roundPrice(value) {

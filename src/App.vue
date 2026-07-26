@@ -11,6 +11,7 @@ import MarketTicker from './components/MarketTicker.vue'
 import OdometerNumber from './components/OdometerNumber.vue'
 import { useMarketStore } from './stores/market'
 import { scrollToCurrentStock } from './utils/scrollToCurrentStock'
+import('./services/testMarketApi.js')
 
 const market = useMarketStore()
 const toast = useToast()
