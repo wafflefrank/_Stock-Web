@@ -1047,6 +1047,12 @@ h2 {
   margin: 14px 0 8px;
   border-bottom: 1px solid rgba(63, 63, 70, 0.7);
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.chart-range-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .chart-range-tabs button {
