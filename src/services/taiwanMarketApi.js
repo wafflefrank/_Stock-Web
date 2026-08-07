@@ -1,3 +1,5 @@
+import axios from 'axios'
+
 export const FINMIND_ENDPOINT = 'https://api.finmindtrade.com/api/v4/data'
 export const TWSE_MARKET_INDEX_ENDPOINT = '/api/twse/market-index'
 export const TPEX_INDEX_ENDPOINT = '/api/tpex/index'
@@ -136,7 +138,7 @@ export function getFallbackTaiwanIndices() {
 }
 
 export async function fetchMarketIndices({
-  fetcher = fetch,
+  fetcher,
   twseEndpoint = TWSE_MARKET_INDEX_ENDPOINT,
   tpexEndpoint = TPEX_INDEX_ENDPOINT,
   yahooChartEndpoint = YAHOO_FINANCE_CHART_ENDPOINT
@@ -230,9 +232,12 @@ export function buildFinMindDatasetUrl(dataset, symbol, { startDate, endDate, to
 
 export function buildFinMindStockInfoUrl(symbol, { token } = {}) {
   const params = new URLSearchParams({
-    dataset: 'TaiwanStockInfo',
-    data_id: symbol
+    dataset: 'TaiwanStockInfo'
   })
+
+  if (symbol) {
+    params.set('data_id', symbol)
+  }
 
   if (token) {
     params.set('token', token)
@@ -241,11 +246,53 @@ export function buildFinMindStockInfoUrl(symbol, { token } = {}) {
   return `${FINMIND_ENDPOINT}?${params.toString()}`
 }
 
+export async function fetchTaiwanStockDirectory({ token, fetcher } = {}) {
+  const payload = await requestJson(buildFinMindStockInfoUrl(null, { token }), {
+    fetcher,
+    errorMessage: 'FinMind stock directory request failed'
+  })
+  const rows = Array.isArray(payload.data) ? payload.data : []
+  const directory = mapTaiwanStockInfoRowsToDirectory(rows)
+
+  if (directory.length === 0) {
+    throw new Error('FinMind TaiwanStockInfo returned no directory rows.')
+  }
+
+  return directory
+}
+
+export function mapTaiwanStockInfoRowsToDirectory(rows) {
+  const bySymbol = new Map()
+
+  rows.forEach((row) => {
+    const symbol = String(row?.stock_id ?? '').trim()
+    const company = String(row?.stock_name ?? '').trim()
+
+    if (!symbol || !company) {
+      return
+    }
+
+    const stock = {
+      symbol,
+      company,
+      sector: String(row.industry_category ?? '').trim() || '台股',
+      signal: '公司資料同步'
+    }
+    const current = bySymbol.get(symbol)
+
+    if (!current || shouldPreferStockInfoProfile(stock, current)) {
+      bySymbol.set(symbol, stock)
+    }
+  })
+
+  return [...bySymbol.values()].sort((a, b) => a.symbol.localeCompare(b.symbol, 'zh-Hant'))
+}
+
 export async function fetchTaiwanWatchlist({
   symbols = TAIWAN_WATCHLIST,
   startDate,
   token,
-  fetcher = fetch
+  fetcher
 } = {}) {
   const fallbackStocks = getFallbackTaiwanStocks()
   const fallbackBySymbol = new Map(fallbackStocks.map((stock) => [stock.symbol, stock]))
@@ -253,16 +300,13 @@ export async function fetchTaiwanWatchlist({
   const requests = await Promise.all(
     symbols.map(async (symbol) => {
       try {
-        const [response, profile] = await Promise.all([
-          fetcher(buildFinMindUrl(symbol, { startDate, token })),
+        const [payload, profile] = await Promise.all([
+          requestJson(buildFinMindUrl(symbol, { startDate, token }), {
+            fetcher,
+            errorMessage: 'FinMind request failed'
+          }),
           getTaiwanStockProfile(symbol, { token, fetcher })
         ])
-
-        if (!response.ok) {
-          throw new Error(`FinMind request failed: ${response.status}`)
-        }
-
-        const payload = await response.json()
         const rows = Array.isArray(payload.data) ? payload.data : []
 
         return rows.length ? mapFinMindRowsToStock(symbol, rows, profile) : null
@@ -300,22 +344,20 @@ export async function fetchTaiwanStockHistory(symbol, {
   range = '1M',
   endDate,
   token,
-  fetcher = fetch
+  fetcher
 } = {}) {
   const rangeWindow = getHistoryRangeWindow(range, endDate)
-  const response = await fetcher(
+  const payload = await requestJson(
     buildFinMindUrl(symbol, {
       startDate: rangeWindow.startDate,
       endDate: rangeWindow.endDate,
       token
-    })
+    }),
+    {
+      fetcher,
+      errorMessage: 'FinMind history request failed'
+    }
   )
-
-  if (!response.ok) {
-    throw new Error(`FinMind history request failed: ${response.status}`)
-  }
-
-  const payload = await response.json()
   const rows = Array.isArray(payload.data) ? payload.data : []
   const history = mapFinMindRowsToHistory(rows)
   const limitedHistory = rangeWindow.limit ? history.slice(-rangeWindow.limit) : history
@@ -331,7 +373,7 @@ export async function fetchTaiwanStockFundamentals(symbol, {
   close,
   endDate,
   token,
-  fetcher = fetch
+  fetcher
 } = {}) {
   const normalizedEndDate = endDate || formatApiDate(new Date())
   const perStartDate = shiftApiDate(normalizedEndDate, { days: -45 })
@@ -368,19 +410,16 @@ export async function fetchTaiwanStockFundamentals(symbol, {
   }
 }
 
-export async function getTaiwanStockProfile(symbol, { token, fetcher = fetch } = {}) {
+export async function getTaiwanStockProfile(symbol, { token, fetcher } = {}) {
   if (STOCK_PROFILES[symbol]) {
     return STOCK_PROFILES[symbol]
   }
 
   try {
-    const response = await fetcher(buildFinMindStockInfoUrl(symbol, { token }))
-
-    if (!response.ok) {
-      throw new Error(`FinMind stock info request failed: ${response.status}`)
-    }
-
-    const payload = await response.json()
+    const payload = await requestJson(buildFinMindStockInfoUrl(symbol, { token }), {
+      fetcher,
+      errorMessage: 'FinMind stock info request failed'
+    })
     const rows = Array.isArray(payload.data) ? payload.data : []
     const row = selectBestStockInfoRow(rows)
 
@@ -464,21 +503,51 @@ function selectBestStockInfoRow(rows) {
   )
 }
 
+function shouldPreferStockInfoProfile(nextStock, currentStock) {
+  return isGenericStockSector(currentStock.sector) && !isGenericStockSector(nextStock.sector)
+}
+
+function isGenericStockSector(value) {
+  return !value || value === '台股' || value === '電子工業'
+}
+
 async function fetchFinMindDataset(dataset, symbol, { startDate, endDate, token, fetcher }) {
-  const response = await fetcher(
+  const payload = await requestJson(
     buildFinMindDatasetUrl(dataset, symbol, {
       startDate,
       endDate,
       token
-    })
+    }),
+    {
+      fetcher,
+      errorMessage: `FinMind ${dataset} request failed`
+    }
   )
+  return Array.isArray(payload.data) ? payload.data : []
+}
 
-  if (!response.ok) {
-    throw new Error(`FinMind ${dataset} request failed: ${response.status}`)
+async function requestJson(url, { fetcher, errorMessage = 'API request failed' } = {}) {
+  if (fetcher) {
+    const response = await fetcher(url)
+
+    if (!response.ok) {
+      throw new Error(`${errorMessage}: ${response.status}`)
+    }
+
+    return response.json()
   }
 
-  const payload = await response.json()
-  return Array.isArray(payload.data) ? payload.data : []
+  try {
+    const response = await axios.get(url)
+    return response.data
+  } catch (error) {
+    const status = error?.response?.status
+    const message = status
+      ? `${errorMessage}: ${status}`
+      : `${errorMessage}: ${error instanceof Error ? error.message : 'unknown error'}`
+
+    throw new Error(message)
+  }
 }
 
 function selectLatestRow(rows, dateKey = 'date') {
@@ -489,13 +558,10 @@ function selectLatestRow(rows, dateKey = 'date') {
 }
 
 async function fetchTwseWeightedIndex({ fetcher, endpoint }) {
-  const response = await fetcher(endpoint)
-
-  if (!response.ok) {
-    throw new Error(`TWSE market index request failed: ${response.status}`)
-  }
-
-  const payload = await response.json()
+  const payload = await requestJson(endpoint, {
+    fetcher,
+    errorMessage: 'TWSE market index request failed'
+  })
   const rows = Array.isArray(payload.data) ? payload.data : []
   const latest = rows.at(-1)
 
@@ -515,13 +581,10 @@ async function fetchTwseWeightedIndex({ fetcher, endpoint }) {
 }
 
 async function fetchTpexIndex({ fetcher, endpoint }) {
-  const response = await fetcher(endpoint)
-
-  if (!response.ok) {
-    throw new Error(`TPEx index request failed: ${response.status}`)
-  }
-
-  const rows = await response.json()
+  const rows = await requestJson(endpoint, {
+    fetcher,
+    errorMessage: 'TPEx index request failed'
+  })
   const latest = Array.isArray(rows) ? rows.at(-1) : null
 
   if (!latest) {
@@ -540,13 +603,10 @@ async function fetchTpexIndex({ fetcher, endpoint }) {
 }
 
 async function fetchYahooIndex(yahooSymbol, { fetcher, endpoint, symbol, label }) {
-  const response = await fetcher(buildYahooChartUrl(endpoint, yahooSymbol))
-
-  if (!response.ok) {
-    throw new Error(`Yahoo Finance index request failed: ${response.status}`)
-  }
-
-  const payload = await response.json()
+  const payload = await requestJson(buildYahooChartUrl(endpoint, yahooSymbol), {
+    fetcher,
+    errorMessage: 'Yahoo Finance index request failed'
+  })
   const result = payload.chart?.result?.[0]
   const selectedQuote = selectYahooCompletedDailyQuote(result)
   const meta = result?.meta

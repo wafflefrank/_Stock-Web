@@ -101,8 +101,7 @@ async function loadChartHistory() {
     const history = await fetchTaiwanStockHistory(stock.symbol, {
       range: activeRange.value,
       endDate: stock.asOfDate,
-      token: import.meta.env?.VITE_FINMIND_TOKEN,
-      fetcher: fetch
+      token: import.meta.env?.VITE_FINMIND_TOKEN
     })
 
     if (requestId !== chartRequestId) {
@@ -134,8 +133,7 @@ async function loadStockFundamentals() {
     const fundamentals = await fetchTaiwanStockFundamentals(stock.symbol, {
       close: stock.price,
       endDate: stock.asOfDate,
-      token: import.meta.env?.VITE_FINMIND_TOKEN,
-      fetcher: fetch
+      token: import.meta.env?.VITE_FINMIND_TOKEN
     })
 
     if (requestId === fundamentalsRequestId) {

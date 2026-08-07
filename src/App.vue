@@ -1,11 +1,13 @@
 <script setup>
-import { onMounted, onUnmounted, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useToast } from 'vue-toastification'
 import ArrowUpRight from 'lucide-vue-next/dist/esm/icons/arrow-up-right.js'
 import Gauge from 'lucide-vue-next/dist/esm/icons/gauge.js'
+import Moon from 'lucide-vue-next/dist/esm/icons/moon.js'
 import RadioTower from 'lucide-vue-next/dist/esm/icons/radio-tower.js'
 import Search from 'lucide-vue-next/dist/esm/icons/search.js'
 import Settings2 from 'lucide-vue-next/dist/esm/icons/settings-2.js'
+import Sun from 'lucide-vue-next/dist/esm/icons/sun.js'
 import HeroTerminal from './components/HeroTerminal.vue'
 import MarketTicker from './components/MarketTicker.vue'
 import OdometerNumber from './components/OdometerNumber.vue'
@@ -15,14 +17,24 @@ import('./services/testMarketApi.js')
 
 const market = useMarketStore()
 const toast = useToast()
+const isDarkMode = ref(false)
 let refreshTimer
 
 onMounted(() => {
+  isDarkMode.value = getStoredTheme() === 'dark'
+  applyTheme(isDarkMode.value)
+
   market.loadTaiwanMarketData()
+  market.loadStockDirectory()
 
   refreshTimer = window.setInterval(() => {
     market.loadTaiwanMarketData()
   }, 15 * 60 * 1000)
+})
+
+watch(isDarkMode, (enabled) => {
+  applyTheme(enabled)
+  persistTheme(enabled)
 })
 
 onUnmounted(() => {
@@ -54,6 +66,32 @@ async function handleSearchResultSelect(symbol) {
 
   if (didSelect) {
     scrollToCurrentStock()
+  }
+}
+
+function toggleTheme() {
+  isDarkMode.value = !isDarkMode.value
+}
+
+function applyTheme(enabled) {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = enabled ? 'dark' : 'light'
+  }
+}
+
+function getStoredTheme() {
+  try {
+    return window.localStorage.getItem('equitypulse-theme')
+  } catch {
+    return null
+  }
+}
+
+function persistTheme(enabled) {
+  try {
+    window.localStorage.setItem('equitypulse-theme', enabled ? 'dark' : 'light')
+  } catch {
+    // Restricted storage should not block the theme toggle.
   }
 }
 
@@ -119,6 +157,17 @@ function showSearchToast(message) {
             </button>
           </div>
         </form>
+        <button
+          class="theme-toggle"
+          type="button"
+          :aria-pressed="isDarkMode"
+          :aria-label="isDarkMode ? '切換至淺色模式' : '切換至深色模式'"
+          @click="toggleTheme"
+        >
+          <Sun v-if="isDarkMode" :size="17" aria-hidden="true" />
+          <Moon v-else :size="17" aria-hidden="true" />
+          <span>{{ isDarkMode ? '淺色' : '深色' }}</span>
+        </button>
         <button class="icon-button" type="button" aria-label="Settings">
           <Settings2 :size="18" aria-hidden="true" />
         </button>

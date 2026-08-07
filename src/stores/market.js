@@ -3,6 +3,7 @@ import {
   STOCK_DIRECTORY,
   TAIWAN_WATCHLIST,
   fetchMarketIndices,
+  fetchTaiwanStockDirectory,
   fetchTaiwanStock,
   fetchTaiwanWatchlist,
   getFallbackHeadlineSignals,
@@ -30,14 +31,48 @@ const timeFormatter = new Intl.DateTimeFormat('zh-TW', {
 })
 
 const normalizedText = (value) => String(value ?? '').trim().toLowerCase()
+let stockDirectoryRequest = null
+
+function findStockDirectoryMatch(directory, query) {
+  const exactMatch = directory.find(
+    (stock) =>
+      normalizedText(stock.symbol) === query ||
+      normalizedText(stock.company) === query
+  )
+
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  return directory.find((stock) =>
+    [stock.symbol, stock.company, stock.sector, stock.signal]
+      .map(normalizedText)
+      .some((value) => value.includes(query))
+  )
+}
+
+function mergeStockDirectory(baseDirectory, remoteDirectory) {
+  const bySymbol = new Map(baseDirectory.map((stock) => [stock.symbol, stock]))
+
+  remoteDirectory.forEach((stock) => {
+    bySymbol.set(stock.symbol, {
+      ...bySymbol.get(stock.symbol),
+      ...stock
+    })
+  })
+
+  return [...bySymbol.values()]
+}
 
 export const useMarketStore = defineStore('market', {
   state: () => ({
     selectedSymbol: '2330',
     watchlistSymbols: [...TAIWAN_WATCHLIST],
+    stockDirectory: [...STOCK_DIRECTORY],
     searchQuery: '',
     searchMessage: '',
     isSearching: false,
+    isDirectoryLoading: false,
     refreshCount: 0,
     isLoading: false,
     dataMode: 'fallback',
@@ -84,7 +119,7 @@ export const useMarketStore = defineStore('market', {
         signal: stock.signal,
         loaded: true
       }))
-      const knownStocks = STOCK_DIRECTORY.map((stock) => ({
+      const knownStocks = state.stockDirectory.map((stock) => ({
         ...stock,
         loaded: state.stocks.some((loadedStock) => loadedStock.symbol === stock.symbol)
       }))
@@ -131,7 +166,7 @@ export const useMarketStore = defineStore('market', {
           fetcher: options.fetcher
         }),
         fetchMarketIndices({
-          fetcher: options.indexFetcher ?? options.fetcher ?? fetch
+          fetcher: options.indexFetcher ?? options.fetcher
         })
       ])
 
@@ -164,6 +199,32 @@ export const useMarketStore = defineStore('market', {
       this.refreshCount += 1
       await this.loadTaiwanMarketData(options)
     },
+    async loadStockDirectory(options = {}) {
+      if (stockDirectoryRequest) {
+        return stockDirectoryRequest
+      }
+
+      this.isDirectoryLoading = true
+      stockDirectoryRequest = (async () => {
+        try {
+          const directory = await fetchTaiwanStockDirectory({
+            token: options.token ?? import.meta.env?.VITE_FINMIND_TOKEN,
+            fetcher: options.fetcher
+          })
+
+          this.stockDirectory = mergeStockDirectory(STOCK_DIRECTORY, directory)
+          return this.stockDirectory
+        } catch (error) {
+          this.lastError = error instanceof Error ? error.message : '台股公司清單同步失敗'
+          return this.stockDirectory
+        } finally {
+          this.isDirectoryLoading = false
+          stockDirectoryRequest = null
+        }
+      })()
+
+      return stockDirectoryRequest
+    },
     async searchAndSelectStock(query = this.searchQuery, options = {}) {
       const normalizedQuery = normalizedText(query)
 
@@ -184,12 +245,13 @@ export const useMarketStore = defineStore('market', {
         return true
       }
 
-      const directoryMatch =
-        STOCK_DIRECTORY.find(
-          (stock) =>
-            normalizedText(stock.symbol) === normalizedQuery ||
-            normalizedText(stock.company) === normalizedQuery
-        ) ?? this.searchSuggestions[0]
+      let directoryMatch = findStockDirectoryMatch(this.stockDirectory, normalizedQuery)
+
+      if (!directoryMatch && !/^\d{4}$/.test(normalizedQuery)) {
+        await this.loadStockDirectory(options)
+        directoryMatch = findStockDirectoryMatch(this.stockDirectory, normalizedQuery)
+      }
+
       const symbol = directoryMatch?.symbol ?? (/^\d{4}$/.test(normalizedQuery) ? normalizedQuery : '')
 
       if (!symbol) {

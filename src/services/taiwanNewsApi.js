@@ -1,3 +1,5 @@
+import axios from 'axios'
+
 export const YAHOO_TAIWAN_MARKET_RSS_URL = 'https://tw.stock.yahoo.com/rss?category=tw-market'
 export const LOCAL_TAIWAN_NEWS_ENDPOINT = '/api/news/tw-market'
 
@@ -33,19 +35,13 @@ export const FALLBACK_TAIWAN_FINANCE_NEWS = [
 
 export async function fetchTaiwanFinanceNews({
   endpoint = import.meta.env?.VITE_TAIWAN_NEWS_ENDPOINT ?? LOCAL_TAIWAN_NEWS_ENDPOINT,
-  fetcher = fetch
+  fetcher
 } = {}) {
   const candidates = buildNewsEndpointCandidates(endpoint)
 
   for (const url of candidates) {
     try {
-      const response = await fetcher(url)
-
-      if (!response.ok) {
-        throw new Error(`Taiwan finance news request failed: ${response.status}`)
-      }
-
-      const text = await response.text()
+      const text = await requestText(url, { fetcher })
       const news = parseTaiwanFinanceNewsRss(text)
 
       if (news.length > 0) {
@@ -107,6 +103,24 @@ function buildNewsEndpointCandidates(endpoint) {
   )
 
   return [...new Set(urls)].filter(Boolean)
+}
+
+async function requestText(url, { fetcher } = {}) {
+  if (fetcher) {
+    const response = await fetcher(url)
+
+    if (!response.ok) {
+      throw new Error(`Taiwan finance news request failed: ${response.status}`)
+    }
+
+    return response.text()
+  }
+
+  const response = await axios.get(url, {
+    responseType: 'text'
+  })
+
+  return typeof response.data === 'string' ? response.data : String(response.data ?? '')
 }
 
 function readXmlText(node, selector) {

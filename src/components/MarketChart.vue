@@ -59,10 +59,16 @@ const seriesRows = computed(() => {
   }))
 })
 
-const chartColor = computed(() => (props.positive ? '#ef4444' : '#22c55e'))
-const chartAreaColor = computed(() =>
-  props.positive ? 'rgba(239, 68, 68, 0.16)' : 'rgba(34, 197, 94, 0.16)'
+const chartColor = computed(() =>
+  props.positive ? getCssColor('--color-up', '#c24d38') : getCssColor('--color-down', '#357a4a')
 )
+const chartAreaColor = computed(() => {
+  const color = props.positive
+    ? getCssColor('--color-up', '#c24d38')
+    : getCssColor('--color-down', '#357a4a')
+
+  return hexToRgba(color, 0.16)
+})
 
 const tradingSessionMinutes = 270
 
@@ -127,19 +133,19 @@ function updateChart() {
       },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(24, 24, 27, 0.96)',
-        borderColor: 'rgba(161, 161, 170, 0.28)',
+        backgroundColor: getCssColor('--color-surface', '#fffdf8'),
+        borderColor: getCssColor('--color-border', '#d7ded4'),
         borderWidth: 1,
         padding: [8, 10],
         className: 'market-chart-tooltip-shell',
         textStyle: {
-          color: '#fafafa',
-          fontFamily: 'Space Mono, IBM Plex Mono, Consolas, monospace',
+          color: getCssColor('--color-text', '#17352d'),
+          fontFamily: 'SFMono-Regular, Consolas, Liberation Mono, monospace',
           fontSize: 12
         },
         axisPointer: {
           lineStyle: {
-            color: 'rgba(244, 244, 245, 0.34)',
+            color: 'rgba(47, 91, 75, 0.3)',
             type: 'dashed'
           }
         },
@@ -170,7 +176,7 @@ function updateChart() {
         data: labels,
         axisLine: {
           lineStyle: {
-            color: 'rgba(113, 113, 122, 0.5)'
+            color: 'rgba(104, 118, 111, 0.35)'
           }
         },
         axisTick: {
@@ -179,8 +185,8 @@ function updateChart() {
           interval: (index) => shouldShowAxisTick(rows[index])
         },
         axisLabel: {
-          color: '#a1a1aa',
-          fontFamily: 'Space Mono, IBM Plex Mono, Consolas, monospace',
+          color: getCssColor('--color-muted', '#68766f'),
+          fontFamily: 'SFMono-Regular, Consolas, Liberation Mono, monospace',
           fontSize: 11,
           hideOverlap: true,
           showMinLabel: true,
@@ -189,7 +195,7 @@ function updateChart() {
           formatter: (_, index) => rows[index]?.tickLabel ?? ''
         },
         nameTextStyle: {
-          color: '#a1a1aa',
+          color: getCssColor('--color-muted', '#68766f'),
           fontWeight: 700,
           padding: [0, 0, 0, 8]
         }
@@ -202,26 +208,26 @@ function updateChart() {
         axisLine: {
           show: true,
           lineStyle: {
-            color: 'rgba(113, 113, 122, 0.5)'
+            color: 'rgba(104, 118, 111, 0.35)'
           }
         },
         axisTick: {
           show: false
         },
         axisLabel: {
-          color: '#fafafa',
-          fontFamily: 'Space Mono, IBM Plex Mono, Consolas, monospace',
+          color: getCssColor('--color-text', '#17352d'),
+          fontFamily: 'SFMono-Regular, Consolas, Liberation Mono, monospace',
           fontSize: 11,
           formatter: (value) => formatAxisPrice(value)
         },
         nameTextStyle: {
-          color: '#a1a1aa',
+          color: getCssColor('--color-muted', '#68766f'),
           fontWeight: 700,
           padding: [0, 26, 0, 0]
         },
         splitLine: {
           lineStyle: {
-            color: 'rgba(63, 63, 70, 0.58)'
+            color: 'rgba(215, 222, 212, 0.85)'
           }
         }
       },
@@ -241,7 +247,7 @@ function updateChart() {
           },
           itemStyle: {
             color: chartColor.value,
-            borderColor: '#09090b',
+            borderColor: getCssColor('--color-surface', '#fffdf8'),
             borderWidth: 2
           },
           areaStyle: {
@@ -260,6 +266,37 @@ function updateChart() {
 
 function shouldSkipChart() {
   return !chartElement.value || typeof window === 'undefined' || import.meta.env.MODE === 'test'
+}
+
+function getCssColor(variable, fallback) {
+  if (typeof document === 'undefined') {
+    return fallback
+  }
+
+  return getComputedStyle(document.documentElement).getPropertyValue(variable).trim() || fallback
+}
+
+function hexToRgba(color, alpha) {
+  const normalized = color.replace('#', '').trim()
+
+  if (![3, 6].includes(normalized.length)) {
+    return color
+  }
+
+  const expanded = normalized.length === 3
+    ? normalized.split('').map((value) => `${value}${value}`).join('')
+    : normalized
+  const numeric = Number.parseInt(expanded, 16)
+
+  if (!Number.isFinite(numeric)) {
+    return color
+  }
+
+  const red = (numeric >> 16) & 255
+  const green = (numeric >> 8) & 255
+  const blue = numeric & 255
+
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
 function buildSessionRows(row, intervalMinutes) {

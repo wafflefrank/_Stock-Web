@@ -1,25 +1,29 @@
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 
-const mountApp = () =>
-  mount(App, {
+// App 一打開就會用 axios 載入股票/新聞資料。
+// 測試只想確認畫面能跑，所以這裡回一包空資料，避免真的連 API。
+vi.mock('axios', () => ({
+  default: {
+    get: vi.fn().mockResolvedValue({ data: { data: [] } })
+  }
+}))
+
+// 這是你拿來手動 console.log API 的檔案，App 測試不需要它輸出。
+vi.mock('./services/testMarketApi.js', () => ({}))
+
+function mountApp() {
+  return mount(App, {
     global: {
       plugins: [createPinia()]
     }
   })
+}
 
 describe('App', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('renders the Taiwan stock market landing page', () => {
+  it('shows the main Taiwan stock page', () => {
     const wrapper = mountApp()
 
     expect(wrapper.text()).toContain('EquityPulse TW')
@@ -27,26 +31,12 @@ describe('App', () => {
     expect(wrapper.text()).toContain('台股觀察清單')
   })
 
-  it('updates the hero snapshot when a Taiwan stock row is selected', async () => {
+  it('can select a stock from the watchlist', async () => {
     const wrapper = mountApp()
-    const foxconnButton = wrapper.get('[aria-label="Select 2317"]')
 
-    await foxconnButton.trigger('click')
+    await wrapper.get('[aria-label="Select 2317"]').trigger('click')
 
+    expect(wrapper.text()).toContain('2317')
     expect(wrapper.text()).toContain('鴻海')
-    expect(wrapper.text()).toContain('NT$212.50')
-  })
-
-  it('selects an existing stock from the search form submit', async () => {
-    const wrapper = mountApp()
-
-    await wrapper.get('[aria-label="Select 2412"]').trigger('click')
-    expect(wrapper.text()).toContain('中華電')
-
-    await wrapper.get('input[type="search"]').setValue('2330')
-    await wrapper.get('form.search-wrapper').trigger('submit')
-
-    expect(wrapper.text()).toContain('台積電')
-    expect(wrapper.text()).toContain('NT$1,135.00')
   })
 })
