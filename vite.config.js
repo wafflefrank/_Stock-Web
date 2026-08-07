@@ -1,7 +1,11 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const repositoryName = process.env.GITHUB_REPOSITORY?.split('/').pop() || '_Stock-Web'
+const isGitHubPagesBuild = process.env.GITHUB_ACTIONS === 'true'
+
 export default defineConfig({
+  base: isGitHubPagesBuild ? `/${repositoryName}/` : '/',
   plugins: [vue()],
   server: {
     proxy: {
