@@ -62,11 +62,22 @@ function buildNewsEndpointCandidates(endpoint) {
 
 async function requestText(url, { fetcher } = {}) {
   if (fetcher) {
-    const response = await fetcher(url)
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 8000)
+    let response
+    try {
+      response = await fetcher(url, { signal: controller.signal, cache: 'no-store' })
+    } finally {
+      window.clearTimeout(timeout)
+    }
     if (!response.ok) throw new Error(`Taiwan finance news request failed: ${response.status}`)
     return response.text()
   }
-  const response = await axios.get(url, { responseType: 'text', cache: 'no-store' })
+  const response = await axios.get(url, {
+    responseType: 'text',
+    timeout: 8000,
+    headers: { 'Cache-Control': 'no-cache' }
+  })
   return typeof response.data === 'string' ? response.data : String(response.data ?? '')
 }
 
