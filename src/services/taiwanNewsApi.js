@@ -3,11 +3,12 @@ import axios from 'axios'
 export const YAHOO_TAIWAN_MARKET_RSS_URL = 'https://tw.finance.yahoo.com/rss?category=tw-market'
 export const LEGACY_YAHOO_TAIWAN_MARKET_RSS_URL = 'https://tw.stock.yahoo.com/rss?category=tw-market'
 export const LOCAL_TAIWAN_NEWS_ENDPOINT = '/api/news/tw-market'
+export const STATIC_TAIWAN_NEWS_ENDPOINT = `${import.meta.env?.BASE_URL ?? '/'}news.json`
 
 export const FALLBACK_TAIWAN_FINANCE_NEWS = []
 
 export async function fetchTaiwanFinanceNews({
-  endpoint = import.meta.env?.VITE_TAIWAN_NEWS_ENDPOINT ?? LOCAL_TAIWAN_NEWS_ENDPOINT,
+  endpoint = import.meta.env?.VITE_TAIWAN_NEWS_ENDPOINT ?? (import.meta.env?.PROD ? STATIC_TAIWAN_NEWS_ENDPOINT : LOCAL_TAIWAN_NEWS_ENDPOINT),
   fetcher
 } = {}) {
   const candidates = buildNewsEndpointCandidates(endpoint)
@@ -15,7 +16,8 @@ export async function fetchTaiwanFinanceNews({
   for (const url of candidates) {
     try {
       const text = await requestText(url, { fetcher })
-      const news = parseTaiwanFinanceNewsRss(text)
+      const rssNews = parseTaiwanFinanceNewsRss(text)
+      const news = rssNews.length ? rssNews : parseTaiwanFinanceNewsJson(text)
       if (news.length > 0) return news
     } catch (error) {
       console.warn('Taiwan finance news request failed:', url, error)
@@ -23,6 +25,15 @@ export async function fetchTaiwanFinanceNews({
   }
 
   return getFallbackTaiwanFinanceNews()
+}
+
+function parseTaiwanFinanceNewsJson(text) {
+  try {
+    const data = JSON.parse(text)
+    return Array.isArray(data) ? data.filter((item) => item?.title && item?.url).slice(0, 8) : []
+  } catch {
+    return []
+  }
 }
 
 export function parseTaiwanFinanceNewsRss(xmlText) {
@@ -52,12 +63,15 @@ export function getFallbackTaiwanFinanceNews() {
 }
 
 function buildNewsEndpointCandidates(endpoint) {
+  const cacheBustedEndpoint = endpoint.includes('news.json')
+    ? `${endpoint}${endpoint.includes('?') ? '&' : '?'}_=${Date.now()}`
+    : endpoint
   const rssUrl = `${YAHOO_TAIWAN_MARKET_RSS_URL}&_=${Date.now()}`
   const legacyRssUrl = `${LEGACY_YAHOO_TAIWAN_MARKET_RSS_URL}&_=${Date.now()}`
   const encoded = encodeURIComponent(rssUrl)
   const legacyEncoded = encodeURIComponent(legacyRssUrl)
   return [...new Set([
-    endpoint,
+    cacheBustedEndpoint,
     `https://api.allorigins.win/raw?url=${encoded}`,
     `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
     `https://api.allorigins.win/raw?url=${legacyEncoded}`,
