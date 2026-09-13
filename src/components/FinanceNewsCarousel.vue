@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ExternalLink from 'lucide-vue-next/dist/esm/icons/external-link.js'
 import LoaderCircle from 'lucide-vue-next/dist/esm/icons/loader-circle.js'
 import Newspaper from 'lucide-vue-next/dist/esm/icons/newspaper.js'
@@ -12,12 +12,37 @@ import { fetchTaiwanFinanceNews } from '../services/taiwanNewsApi'
 const modules = [A11y, Autoplay, Keyboard, Pagination]
 const newsItems = ref([])
 const isLoading = ref(true)
+const lastUpdated = ref(null)
+const loadError = ref('')
+let refreshTimer
 
 const canLoop = computed(() => newsItems.value.length > 1)
 
-onMounted(async () => {
-  newsItems.value = await fetchTaiwanFinanceNews()
-  isLoading.value = false
+async function refreshNews() {
+  try {
+    const latestNews = await fetchTaiwanFinanceNews()
+    if (latestNews.length > 0) {
+      newsItems.value = latestNews
+      lastUpdated.value = new Date()
+      loadError.value = ''
+    } else if (!newsItems.value.length) {
+      loadError.value = '目前無法取得新聞'
+    }
+  } catch (error) {
+    loadError.value = '新聞同步失敗'
+    console.warn('Taiwan finance news refresh failed:', error)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+onMounted(() => {
+  refreshNews()
+  refreshTimer = window.setInterval(refreshNews, 5 * 60 * 1000)
+})
+
+onUnmounted(() => {
+  window.clearInterval(refreshTimer)
 })
 
 function formatNewsTime(value) {
@@ -44,7 +69,7 @@ function formatNewsTime(value) {
       </span>
       <span class="news-carousel__badge">
         <LoaderCircle v-if="isLoading" :size="13" aria-hidden="true" />
-        {{ isLoading ? '更新中' : 'Yahoo 股市 RSS' }}
+        {{ isLoading ? '更新中' : loadError || 'Yahoo 股市 RSS' }}
       </span>
     </div>
 
@@ -52,6 +77,10 @@ function formatNewsTime(value) {
 
     <div v-if="isLoading" class="news-carousel__loading" aria-live="polite">
       載入最新市場新聞...
+    </div>
+
+    <div v-else-if="!newsItems.length" class="news-carousel__loading" aria-live="polite">
+      暫時沒有可顯示的新聞，請稍後再試。
     </div>
 
     <Swiper
@@ -80,5 +109,9 @@ function formatNewsTime(value) {
         </article>
       </SwiperSlide>
     </Swiper>
+
+    <time v-if="lastUpdated" class="news-carousel__updated" :datetime="lastUpdated.toISOString()">
+      最後同步 {{ formatNewsTime(lastUpdated) }}
+    </time>
   </div>
 </template>
