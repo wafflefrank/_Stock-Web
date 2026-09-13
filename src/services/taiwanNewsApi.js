@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-export const YAHOO_TAIWAN_MARKET_RSS_URL = 'https://tw.stock.yahoo.com/rss?category=tw-market'
+export const YAHOO_TAIWAN_MARKET_RSS_URL = 'https://tw.finance.yahoo.com/rss?category=tw-market'
+export const LEGACY_YAHOO_TAIWAN_MARKET_RSS_URL = 'https://tw.stock.yahoo.com/rss?category=tw-market'
 export const LOCAL_TAIWAN_NEWS_ENDPOINT = '/api/news/tw-market'
 
 export const FALLBACK_TAIWAN_FINANCE_NEWS = []
@@ -52,11 +53,15 @@ export function getFallbackTaiwanFinanceNews() {
 
 function buildNewsEndpointCandidates(endpoint) {
   const rssUrl = `${YAHOO_TAIWAN_MARKET_RSS_URL}&_=${Date.now()}`
+  const legacyRssUrl = `${LEGACY_YAHOO_TAIWAN_MARKET_RSS_URL}&_=${Date.now()}`
   const encoded = encodeURIComponent(rssUrl)
+  const legacyEncoded = encodeURIComponent(legacyRssUrl)
   return [...new Set([
     endpoint,
     `https://api.allorigins.win/raw?url=${encoded}`,
-    `https://api.codetabs.com/v1/proxy?quest=${encoded}`
+    `https://api.codetabs.com/v1/proxy?quest=${encoded}`,
+    `https://api.allorigins.win/raw?url=${legacyEncoded}`,
+    `https://api.codetabs.com/v1/proxy?quest=${legacyEncoded}`
   ])].filter(Boolean)
 }
 
